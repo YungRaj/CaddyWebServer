@@ -1,0 +1,5 @@
+localhost:2100 {
+    root * /Users/ilhanraja/Downloads/Files/Code/projects/caddy_web_server
+    encode gzip
+    file_server
+}
