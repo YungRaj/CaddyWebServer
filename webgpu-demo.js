@@ -1,76 +1,98 @@
-const vertexShader = /* language=WGSL */ `
-  struct VSOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) color: vec4<f32>
-  };
-  let positions = array<vec2<f32>,3>(
-    vec2( 0.0,  0.5), 
-    vec2(-0.5, -0.5), 
-    vec2( 0.5, -0.5)
-  );
-  let colors = array<vec3<f32>,3>(
-    vec3(0.0, 1.0, 1.0), 
-    vec3(0.0, 0.0, 1.0), 
-    vec3(1.0, 0.0, 1.0)
-  );
-  @stage(vertex)
-  fn main(@builtin(vertex_index) vertexIndex: u32) -> VSOutput {
-    return VSOutput(
-      vec4(positions[vertexIndex], 0.0, 1.0),
-      vec4(colors[vertexIndex], 1.0)
-    );
-  }`
+import { makeSample, SampleInit } from './SampleLayout';
 
-const fragmentShader = /* language=WGSL */ `
-  @stage(fragment)
-  fn main(@location(0) color: vec4<f32>) -> @location(0) vec4<f32> {
-    return color;
-  }`
+import triangleVertWGSL from './triangle.vert.wgsl';
+import redFragWGSL from './red.frag.wgsl';
 
-const render = async (gpu, canvasContext) => {
-  // canvas independent part
-  const device = await (await gpu.requestAdapter()).requestDevice()
-  const format = gpu.getPreferredCanvasFormat() // 'bgra8unorm'
-  const commandEncoder = device.createCommandEncoder()
+const init: SampleInit = async ({ canvas, pageState }) => {
+  const adapter = await navigator.gpu.requestAdapter();
+  const device = await adapter.requestDevice();
+
+  if (!pageState.active) return;
+  const context = canvas.getContext('webgpu') as GPUCanvasContext;
+
+  const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+  context.configure({
+    device,
+    format: presentationFormat,
+    alphaMode: 'opaque',
+  });
+
   const pipeline = device.createRenderPipeline({
     layout: 'auto',
     vertex: {
-      module: device.createShaderModule({ code: vertexShader }),
+      module: device.createShaderModule({
+        code: triangleVertWGSL,
+      }),
       entryPoint: 'main',
     },
     fragment: {
-      module: device.createShaderModule({ code: fragmentShader }),
+      module: device.createShaderModule({
+        code: redFragWGSL,
+      }),
       entryPoint: 'main',
-      targets: [{ format }],
+      targets: [
+        {
+          format: presentationFormat,
+        },
+      ],
     },
-    primitive: { topology: 'triangle-list' },
-  })
+    primitive: {
+      topology: 'triangle-list',
+    },
+  });
 
-  // canvas dependent part
-  canvasContext.configure({ device, format, alphaMode: 'premultiplied' })
-  const passEncoder = commandEncoder.beginRenderPass({
-    colorAttachments: [
+  function frame() {
+    // Sample is no longer the active page.
+    if (!pageState.active) return;
+
+    const commandEncoder = device.createCommandEncoder();
+    const textureView = context.getCurrentTexture().createView();
+
+    const renderPassDescriptor: GPURenderPassDescriptor = {
+      colorAttachments: [
+        {
+          view: textureView,
+          clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        },
+      ],
+    };
+
+    const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
+    passEncoder.setPipeline(pipeline);
+    passEncoder.draw(3, 1, 0, 0);
+    passEncoder.end();
+
+    device.queue.submit([commandEncoder.finish()]);
+    requestAnimationFrame(frame);
+  }
+
+  requestAnimationFrame(frame);
+};
+
+const HelloTriangle: () => JSX.Element = () =>
+  makeSample({
+    name: 'Hello Triangle',
+    description: 'Shows rendering a basic triangle.',
+    init,
+    sources: [
       {
-        view: canvasContext.getCurrentTexture().createView(),
-        clearValue: { r: 0, g: 0.05, b: 0, a: 1 },
-        loadOp: 'clear',
-        storeOp: 'store',
+        name: __filename.substring(__dirname.length + 1),
+        contents: __SOURCE__,
+      },
+      {
+        name: './triangle.vert.wgsl',
+        contents: triangleVertWGSL,
+        editable: true,
+      },
+      {
+        name: './red.frag.wgsl',
+        contents: redFragWGSL,
+        editable: true,
       },
     ],
-  })
-  passEncoder.setPipeline(pipeline)
-  passEncoder.draw(3, 1, 0, 0)
-  passEncoder.end()
+    filename: __filename,
+  });
 
-  // draw
-  device.queue.submit([commandEncoder.finish()])
-}
-
-if (navigator.gpu) {
-  render(
-    navigator.gpu,
-    document.getElementById('canvas').getContext('webgpu')
-  ).then()
-} else {
-  alert('WebGPU is not supported or is not enabled, see https://webgpu.io')
-}
+export default HelloTriangle;
